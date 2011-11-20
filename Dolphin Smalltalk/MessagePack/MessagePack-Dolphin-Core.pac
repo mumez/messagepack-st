@@ -3,7 +3,7 @@ package := Package name: 'MessagePack-Dolphin-Core'.
 package paxVersion: 1;
 	basicComment: ''.
 
-package basicPackageVersion: 'MessagePack-Squeak-Core-mu.1'.
+package basicPackageVersion: '2'.
 
 
 package classNames
@@ -95,6 +95,9 @@ readUint64From: stream	| bytes |
 	^ ((bytes basicAt: 1) bitShift: 56) + ((bytes basicAt: 2) bitShift: 48) + ((bytes basicAt: 3) bitShift: 40) + ((bytes basicAt: 4) bitShift: 32) +
 	((bytes basicAt: 5) bitShift: 24) + ((bytes basicAt: 6) bitShift: 16) + ((bytes basicAt: 7) bitShift: 8) + (bytes basicAt: 8)!
 
+useFastBulkWrite
+	^ true!
+
 writeDouble: value to: stream	| bytes |
 	bytes := ByteArray new: 8.
 	bytes doubleAtOffset: 0 put: value.
@@ -144,6 +147,7 @@ writeUint64: value to: stream	| bytes |
 !MpDolpPortableUtil categoriesFor: #readUint16From:!actions/stream!public! !
 !MpDolpPortableUtil categoriesFor: #readUint32From:!actions/stream!public! !
 !MpDolpPortableUtil categoriesFor: #readUint64From:!actions/stream!public! !
+!MpDolpPortableUtil categoriesFor: #useFastBulkWrite!defaults!public! !
 !MpDolpPortableUtil categoriesFor: #writeDouble:to:!actions/stream!public! !
 !MpDolpPortableUtil categoriesFor: #writeFloat:to:!actions/stream!public! !
 !MpDolpPortableUtil categoriesFor: #writeInt16:to:!actions/stream!public! !

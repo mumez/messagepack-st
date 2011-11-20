@@ -11,6 +11,7 @@ package classNames
 	add: #MpEncoder;
 	add: #MpEncodeTypeMapper;
 	add: #MpError;
+	add: #MpMemoryWriteStream;
 	add: #MpMessagePack;
 	add: #MpPortableUtil;
 	add: #MpSettings;
@@ -18,8 +19,17 @@ package classNames
 	yourself.
 
 package methodNames
+	add: #Array -> #mpWriteSelector;
 	add: #Behavior -> #fromMessagePack:;
+	add: #ByteArray -> #mpWriteSelector;
+	add: #Dictionary -> #mpWriteSelector;
+	add: #False -> #mpWriteSelector;
+	add: #IdentityDictionary -> #mpWriteSelector;
+	add: #Integer -> #mpWriteSelector;
 	add: #Object -> #messagePacked;
+	add: #Object -> #mpWriteSelector;
+	add: #True -> #mpWriteSelector;
+	add: #UndefinedObject -> #mpWriteSelector;
 	yourself.
 
 package binaryGlobalNames: (Set new
@@ -48,6 +58,11 @@ Object subclass: #MpDecoder
 	classInstanceVariableNames: ''!
 Object subclass: #MpEncoder
 	instanceVariableNames: 'writeStream typeMapper settings'
+	classVariableNames: ''
+	poolDictionaries: ''
+	classInstanceVariableNames: ''!
+Object subclass: #MpMemoryWriteStream
+	instanceVariableNames: 'chunks currentChunk chunkPosition chunkSize lastSize'
 	classVariableNames: ''
 	poolDictionaries: ''
 	classInstanceVariableNames: ''!
@@ -92,15 +107,71 @@ MpTypeMapper subclass: #MpEncodeTypeMapper
 
 "Loose Methods"!
 
+!Array methodsFor!
+
+mpWriteSelector
+	self class == Array ifTrue: [^#writeArray:].
+	^nil! !
+!Array categoriesFor: #mpWriteSelector!*MessagePack/Core/optimization!public! !
+
 !Behavior methodsFor!
 
 fromMessagePack: bytes	^ MpDecoder decode: bytes! !
 !Behavior categoriesFor: #fromMessagePack:!*MessagePack/Core/unpacking!public! !
 
+!ByteArray methodsFor!
+
+mpWriteSelector
+	self class == ByteArray ifTrue: [^#writeRawBytes:].
+	^nil! !
+!ByteArray categoriesFor: #mpWriteSelector!*MessagePack/Core/optimization!public! !
+
+!Dictionary methodsFor!
+
+mpWriteSelector
+	self class == Dictionary ifTrue: [^#writeMap:].
+	^nil! !
+!Dictionary categoriesFor: #mpWriteSelector!public! !
+
+!False methodsFor!
+
+mpWriteSelector
+	^#writeFalse:! !
+!False categoriesFor: #mpWriteSelector!*MessagePack/Core/optimization!public! !
+
+!IdentityDictionary methodsFor!
+
+mpWriteSelector
+	^nil! !
+!IdentityDictionary categoriesFor: #mpWriteSelector!*MessagePack/Core/optimization!public! !
+
+!Integer methodsFor!
+
+mpWriteSelector
+	^#writeInteger:! !
+!Integer categoriesFor: #mpWriteSelector!*MessagePack/Core/optimization!public! !
+
 !Object methodsFor!
 
-messagePacked	^ MpEncoder encode: self! !
+messagePacked	^ MpEncoder encode: self!
+
+mpWriteSelector
+	^nil
+! !
 !Object categoriesFor: #messagePacked!*MessagePack/Core/packing!public! !
+!Object categoriesFor: #mpWriteSelector!*MessagePack/Core/optimization!public! !
+
+!True methodsFor!
+
+mpWriteSelector
+	^#writeTrue:! !
+!True categoriesFor: #mpWriteSelector!*MessagePack/Core/optimization!public! !
+
+!UndefinedObject methodsFor!
+
+mpWriteSelector
+	^#writeNil:! !
+!UndefinedObject categoriesFor: #mpWriteSelector!*MessagePack/Core/optimization!public! !
 
 "End of package definition"!
 
@@ -223,7 +294,7 @@ readMap16	| size |	size := MpPortableUtil default readUint16From: self readStr
 
 readMap32	| size |	size := MpPortableUtil default readUint32From: self readStream.	^ self readMapSized: size!
 
-readMapSized: size	| dic |	dic := self createDictionary: size.	1 to: size do: [:idx |		dic at: self readObject put: self readObject	].	^dic!
+readMapSized: size	| dic |	dic := self createDictionary: size.	size timesRepeat: [		dic at: self readObject put: self readObject	].	^dic!
 
 readNegativeFixNum: firstByte	| val |	val := (firstByte bitAnd: 2r11111).	^ val - 32!
 
@@ -337,6 +408,15 @@ MpEncoder comment: ''!
 
 contents	^self writeStream contents!
 
+createWriteStream
+	self settings fastBulkWrite ifTrue: [
+		^MpMemoryWriteStream chunkSized: self settings defaultStreamSize.	
+	].
+
+	^WriteStream on: (ByteArray new: self settings defaultStreamSize).
+	
+	!
+
 encode: anObject	^self encode: anObject on: self writeStream!
 
 encode: anObject on: aStream	self write: anObject on: aStream.	^self contents.!
@@ -397,7 +477,10 @@ writeRawBytes: bytes	| size |	size := bytes size.	self writeRawBytesSize: siz
 
 writeRawBytesSize: size	size < 16r10 ifTrue: [^ self writeStream nextPut: (2r10100000 bitOr: size)].	size < 16r10000  ifTrue: [		self writeStream nextPut: MpConstants raw16.		^MpPortableUtil default writeUint16: size to: self writeStream	].	size < 16r100000000  ifTrue: [		self writeStream nextPut: MpConstants raw32.		^MpPortableUtil default writeUint32: size to: self writeStream	].		self signalError!
 
-writeStream	writeStream isNil		ifTrue: [writeStream := WriteStream						on: (ByteArray new: self settings defaultStreamSize)].	^ writeStream!
+writeStream
+	writeStream isNil
+		ifTrue: [writeStream := self createWriteStream].
+	^ writeStream!
 
 writeStream: anObject	"Set the value of writeStream"	writeStream := anObject!
 
@@ -411,6 +494,7 @@ writeUint64: value	self writeStream nextPut: MpConstants uint64.	MpPortableUti
 
 writeUint8: value	self writeStream nextPut: MpConstants uint8.	self writeStream nextPut: value! !
 !MpEncoder categoriesFor: #contents!accessing!public! !
+!MpEncoder categoriesFor: #createWriteStream!factory!public! !
 !MpEncoder categoriesFor: #encode:!encoding!public! !
 !MpEncoder categoriesFor: #encode:on:!encoding!public! !
 !MpEncoder categoriesFor: #nextPut:!public!stream/like! !
@@ -463,6 +547,192 @@ onBytes: byteArray	^self on: (WriteStream on: byteArray).! !
 !MpEncoder class categoriesFor: #on:!actions!public! !
 !MpEncoder class categoriesFor: #onBytes:!actions!public! !
 
+MpMemoryWriteStream guid: (GUID fromString: '{338F263D-428B-4D4F-9BFB-02B4131663E3}')!
+MpMemoryWriteStream comment: ''!
+!MpMemoryWriteStream categoriesForClass!Unclassified! !
+!MpMemoryWriteStream methodsFor!
+
+asByteArray
+	"Answer receiver as byte array."
+	
+	| bytes pos idx len coll bytesSize |
+	bytes := ByteArray new: (bytesSize := self size).
+	pos := 0.
+	idx := 1.
+	[coll := self chunks at: idx.
+	len := coll size.
+	pos + len < bytesSize]
+		whileTrue:
+			[bytes
+				replaceFrom: pos + 1
+				to: (pos := pos + len)
+				with: coll
+				startingAt: 1.
+			idx := idx + 1].
+	bytes
+		replaceFrom: pos + 1
+		to: bytesSize
+		with: coll
+		startingAt: 1.
+	^bytes!
+
+chunkPosition
+	^chunkPosition!
+
+chunkPosition: anObject
+	^chunkPosition := anObject!
+
+chunks
+	^chunks!
+
+chunks: anObject
+	chunks := anObject!
+
+chunkSize
+	^chunkSize ifNil: [chunkSize := 1024]!
+
+chunkSize: anObject
+	chunkSize := anObject!
+
+contents
+	
+	^self asByteArray!
+
+currentChunk
+	^currentChunk!
+
+currentChunk: anObject
+	^currentChunk := anObject!
+
+initialize
+	chunks := OrderedCollection new.
+	self makeSpace!
+
+lastSize
+	^lastSize!
+
+lastSize: anObject
+	lastSize := anObject!
+
+makeSpace
+	self chunks add: self prepareCurrentChunk.
+	self chunkPosition: 0.
+	self lastSize: 0!
+
+moveToNext
+	| curChunk |
+	self chunkPosition: 0.
+	curChunk := self currentChunk.
+	(curChunk isNil or: [curChunk == self chunks last])
+		ifTrue: 
+			[self makeSpace]
+		ifFalse: 
+			[1 to: self chunks size
+				do: 
+					[:idx |
+					(self chunks at: idx) == curChunk
+						ifTrue: 
+							[self currentChunk: (self chunks at: idx + 1).
+							^self]]]!
+
+nextPut: integer
+	
+	self chunkPosition >= self chunkSize ifTrue: [self moveToNext].
+	self chunkPosition: self chunkPosition + 1.
+	self currentChunk
+		at: self chunkPosition
+		put: integer!
+
+nextPutAll: bytes
+	
+	self
+		putBytes: bytes
+		sized: bytes size!
+
+position
+	
+	| idx size coll |
+	self currentChunk isNil ifTrue: [^0].
+	idx := 1.
+	size := 0.
+	[(coll := self chunks at: idx) == self currentChunk]
+		whileFalse:
+			[idx := idx + 1.
+			size := size + coll size].
+	^size + self chunkPosition!
+
+prepareCurrentChunk
+	^self currentChunk: (ByteArray new: self chunkSize)!
+
+putBytes: bytes sized: len 
+	len > (self chunkSize - self chunkPosition) 
+		ifTrue: 
+			[(self currentChunk notNil 
+				and: [self chunks last == self currentChunk and: [len > 64]]) 
+					ifTrue: 
+						[self chunks at: self chunks size put: (self currentChunk copyFrom: 1 to: self chunkPosition).
+						self chunks add: bytes.
+						self makeSpace]
+					ifFalse: [1 to: len do: [:i | self nextPut: (bytes at: i)]]]
+		ifFalse: 
+			[self currentChunk 
+				replaceFrom: self chunkPosition + 1
+				to: self chunkPosition + len
+				with: bytes
+				startingAt: 1.
+			self chunkPosition: self chunkPosition + len]!
+
+size
+	
+	| size count |
+	self currentChunk isNil ifTrue: [^0].
+	size := 0.
+	count := self chunks size.
+	1
+		to: count - 1
+		do: [:idx | size := size + (self chunks at: idx) size].
+	self currentChunk == (self chunks at: count)
+		ifTrue:
+			[self lastSize < self chunkPosition
+				ifTrue: [self lastSize: self chunkPosition]].
+	^size + self lastSize! !
+!MpMemoryWriteStream categoriesFor: #asByteArray!actions!public! !
+!MpMemoryWriteStream categoriesFor: #chunkPosition!acessing!public! !
+!MpMemoryWriteStream categoriesFor: #chunkPosition:!acessing!public! !
+!MpMemoryWriteStream categoriesFor: #chunks!acessing!public! !
+!MpMemoryWriteStream categoriesFor: #chunks:!acessing!public! !
+!MpMemoryWriteStream categoriesFor: #chunkSize!acessing!public! !
+!MpMemoryWriteStream categoriesFor: #chunkSize:!acessing!public! !
+!MpMemoryWriteStream categoriesFor: #contents!actions!public! !
+!MpMemoryWriteStream categoriesFor: #currentChunk!acessing!public! !
+!MpMemoryWriteStream categoriesFor: #currentChunk:!acessing!public! !
+!MpMemoryWriteStream categoriesFor: #initialize!initialize/release!public! !
+!MpMemoryWriteStream categoriesFor: #lastSize!acessing!public! !
+!MpMemoryWriteStream categoriesFor: #lastSize:!acessing!public! !
+!MpMemoryWriteStream categoriesFor: #makeSpace!private! !
+!MpMemoryWriteStream categoriesFor: #moveToNext!private! !
+!MpMemoryWriteStream categoriesFor: #nextPut:!actions!public! !
+!MpMemoryWriteStream categoriesFor: #nextPutAll:!actions!public! !
+!MpMemoryWriteStream categoriesFor: #position!actions!public! !
+!MpMemoryWriteStream categoriesFor: #prepareCurrentChunk!private! !
+!MpMemoryWriteStream categoriesFor: #putBytes:sized:!private! !
+!MpMemoryWriteStream categoriesFor: #size!actions!public! !
+
+!MpMemoryWriteStream class methodsFor!
+
+chunkSized: chunkSize
+	
+	^(self basicNew)
+		chunkSize: chunkSize;
+		initialize;
+		yourself!
+
+new
+	
+	^super new initialize! !
+!MpMemoryWriteStream class categoriesFor: #chunkSized:!instance creation!public! !
+!MpMemoryWriteStream class categoriesFor: #new!instance creation!public! !
+
 MpMessagePack guid: (GUID fromString: '{31D67B60-74CB-481F-AA2E-CD18C230C365}')!
 MpMessagePack comment: ''!
 !MpMessagePack categoriesForClass!MessagePack-Core! !
@@ -508,6 +778,9 @@ readUint64From: stream	self subclassResponsibility !
 
 signalException: anException	"Ansi"	^anException signal!
 
+useFastBulkWrite
+	^ false!
+
 writeDouble: value to: stream	self subclassResponsibility !
 
 writeFloat: value to: stream	self subclassResponsibility !
@@ -536,6 +809,7 @@ writeUint64: value to: stream	self subclassResponsibility ! !
 !MpPortableUtil categoriesFor: #readUint32From:!actions/stream!public! !
 !MpPortableUtil categoriesFor: #readUint64From:!actions/stream!public! !
 !MpPortableUtil categoriesFor: #signalException:!actions!public! !
+!MpPortableUtil categoriesFor: #useFastBulkWrite!defaults!public! !
 !MpPortableUtil categoriesFor: #writeDouble:to:!actions/stream!public! !
 !MpPortableUtil categoriesFor: #writeFloat:to:!actions/stream!public! !
 !MpPortableUtil categoriesFor: #writeInt16:to:!actions/stream!public! !
@@ -579,6 +853,12 @@ defaultStreamSize	^self at: #defaultStreamSize ifAbsentPut: [1024]!
 
 defaultStreamSize: anInteger	^self at: #defaultStreamSize put: anInteger!
 
+fastBulkWrite
+	^self at: #fastBulkWrite ifAbsentPut: [MpPortableUtil default useFastBulkWrite]!
+
+fastBulkWrite: aBoolean
+	^self at: #fastBulkWrite put: aBoolean!
+
 includesKey: key	^self settingsDict includesKey: key!
 
 initialize	settingsDict := nil!
@@ -592,6 +872,8 @@ settingsDict	^ settingsDict ifNil: [settingsDict := IdentityDictionary new]! !
 !MpSettings categoriesFor: #at:put:!actions/dictionary!public! !
 !MpSettings categoriesFor: #defaultStreamSize!accessing!public! !
 !MpSettings categoriesFor: #defaultStreamSize:!accessing!public! !
+!MpSettings categoriesFor: #fastBulkWrite!accessing!public! !
+!MpSettings categoriesFor: #fastBulkWrite:!accessing!public! !
 !MpSettings categoriesFor: #includesKey:!actions/dictionary!public! !
 !MpSettings categoriesFor: #initialize!class initialization!public! !
 !MpSettings categoriesFor: #keys!actions/dictionary!public! !
@@ -690,7 +972,7 @@ defineTrueActionTo: map	map at: MpConstants true put: #readTrue!
 
 defineUnsignedIntegerActionTo: map	map at: MpConstants uint8 put: #readUint8.	map at: MpConstants uint16 put: #readUint16.	map at: MpConstants uint32 put: #readUint32.	map at: MpConstants uint64 put: #readUint64.!
 
-on: bertDecoder 	^ self new decoder: bertDecoder;		 initActionMaps;		 yourself! !
+on: mpDecoder 	^ self new decoder: mpDecoder;		 initActionMaps;		 yourself! !
 !MpDecodeTypeMapper class categoriesFor: #defineArrayActionTo:!actions for compounds!public! !
 !MpDecodeTypeMapper class categoriesFor: #defineCompoundsActionsTo:!actions for compounds!public! !
 !MpDecodeTypeMapper class categoriesFor: #defineDoubleActionTo:!actions for primitives!public! !
@@ -714,7 +996,15 @@ encoder	"Answer the value of encoder"	^ encoder!
 
 encoder: anObject	"Set the value of encoder"	encoder := anObject!
 
-writeObject: anObject ifNotApplied: aBlock 	| actionSelector |	actionMap		ifNotNil: [actionSelector := self actionMap at: anObject class ifAbsent: [].			actionSelector ifNotNil: [^ self encoder perform: actionSelector with: anObject]].			actionSelector := self defaultActionMap				at: anObject class				ifAbsent: [^ aBlock value].	^ self encoder perform: actionSelector with: anObject! !
+writeObject: anObject ifNotApplied: aBlock 
+	| actionSelector |
+	actionMap
+		ifNotNil: [actionSelector := self actionMap at: anObject class ifAbsent: [].
+			actionSelector ifNotNil: [^ self encoder perform: actionSelector with: anObject]].
+		
+	actionSelector := anObject mpWriteSelector.
+	actionSelector ifNil: [actionSelector := self defaultActionMap at: anObject class ifAbsent: [^ aBlock value]].
+	^ self encoder perform: actionSelector with: anObject! !
 !MpEncodeTypeMapper categoriesFor: #encoder!accessing!public! !
 !MpEncodeTypeMapper categoriesFor: #encoder:!accessing!public! !
 !MpEncodeTypeMapper categoriesFor: #writeObject:ifNotApplied:!actions!public! !
@@ -743,7 +1033,7 @@ defineRawBytesActionTo: map	map at: ByteArray put: #writeRawBytes:!
 
 defineTrueActionTo: map	map at: True put: #writeTrue:!
 
-on: bertEncoder 	^ self new encoder: bertEncoder;		 initActionMaps;		 yourself! !
+on: mpEncoder 	^ self new encoder: mpEncoder;		 initActionMaps;		 yourself! !
 !MpEncodeTypeMapper class categoriesFor: #defineArrayActionTo:!actions for compounds!public! !
 !MpEncodeTypeMapper class categoriesFor: #defineCompoundsActionsTo:!actions for compounds!public! !
 !MpEncodeTypeMapper class categoriesFor: #defineDoubleActionTo:!actions for primitives!public! !
